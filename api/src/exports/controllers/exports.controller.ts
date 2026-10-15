@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Param, UseGuards, Body, Request } from '@nestjs/common';
 import { ExportService } from '../services/export.service';
-import { DataExport, ExportType } from '../interfaces/export.interface';
+import { DataExport, ExportType, ExportRole } from '../interfaces/export.interface';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JobQueueService } from '../../workers/services/job-queue.service';
 import { JobPayload, JobType } from '../../workers/interfaces/job.interface';
@@ -19,14 +19,9 @@ export class ExportsController {
     @Body() body: { exportType: ExportType },
   ): Promise<DataExport> {
     const userId = req.user.sub;
+    const userRole = (req.user.role as ExportRole) || ExportRole.INVESTOR;
 
-    // Validate export access
-    const hasAccess = await this.exportService.validateExportAccess(userId, [body.exportType]);
-    if (!hasAccess) {
-      throw new Error('User does not have access to this export type');
-    }
-
-    const exportRecord = await this.exportService.createExport(userId, body.exportType);
+    const exportRecord = await this.exportService.createExport(userId, body.exportType, userRole);
 
     // Enqueue background job for large exports
     const jobPayload: JobPayload = {
@@ -35,6 +30,7 @@ export class ExportsController {
         exportId: exportRecord.id,
         userId,
         recordType: body.exportType,
+        userRole,
       },
       userId,
       correlationId: exportRecord.id,
@@ -49,6 +45,16 @@ export class ExportsController {
   async getExport(@Param('exportId') exportId: string, @Request() req: any): Promise<DataExport | null> {
     const userId = req.user.sub;
     return this.exportService.getExport(exportId, userId);
+  }
+
+  @Post(':exportId/cancel')
+  async cancelExport(
+    @Param('exportId') exportId: string,
+    @Request() req: any,
+  ): Promise<DataExport> {
+    const userId = req.user.sub;
+    const userRole = (req.user.role as ExportRole) || ExportRole.INVESTOR;
+    return this.exportService.cancelExport(exportId, userId, userRole);
   }
 
   @Get('status/:exportId')

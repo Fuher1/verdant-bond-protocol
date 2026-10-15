@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobHandler } from '../../workers/services/worker.service';
 import { ExportService } from '../services/export.service';
+import { ExportRole, ExportCaller, ExportableRecord } from '../interfaces/export.interface';
 
 @Injectable()
 export class DataExportJobHandler implements JobHandler {
@@ -9,37 +10,76 @@ export class DataExportJobHandler implements JobHandler {
   constructor(private readonly exportService: ExportService) {}
 
   async handle(payload: any): Promise<Record<string, any>> {
-    const { exportId, userId, recordType } = payload;
+    const { exportId, userId, recordType, userRole = ExportRole.INVESTOR } = payload;
 
-    this.logger.log(`Processing data export ${exportId} for user ${userId}, type ${recordType}`);
+    this.logger.log(`Processing data export ${exportId} for user ${userId}, type ${recordType}, role ${userRole}`);
+
+    // Check if job was already cancelled before picking up
+    if (await this.exportService.isExportCancelled(exportId)) {
+      this.logger.warn(`Export ${exportId} was cancelled before worker pickup`);
+      return { exportId, status: 'cancelled' };
+    }
 
     // Update export status to processing
     await this.exportService.updateExportStatus(exportId, 'processing');
 
     try {
-      // Simulate collecting records - in production, this would fetch from database
-      const mockRecords = Array.from({ length: 100 }, (_, i) => ({
-        id: `${recordType}-${i}`,
-        type: recordType,
-        createdAt: new Date(),
-        data: { index: i, userId },
-      }));
+      // Chunked generator for bounded memory
+      async function* generateChunks(totalCount = 100, chunkSize = 25) {
+        for (let i = 0; i < totalCount; i += chunkSize) {
+          const currentChunkSize = Math.min(chunkSize, totalCount - i);
+          const chunk: ExportableRecord[] = Array.from({ length: currentChunkSize }, (_, idx) => {
+            const index = i + idx;
+            return {
+              id: `${recordType}-${index}`,
+              type: recordType,
+              createdAt: new Date(),
+              ownerUserId: userId,
+              data: {
+                index,
+                userId,
+                // Sample fields including forbidden ones to test role scrubbing
+                status: 'verified',
+                internalRiskScore: 85,
+                signingSeed: 'SECRET_SEED_DO_NOT_LEAK',
+              },
+            };
+          });
+          yield chunk;
+        }
+      }
 
-      const exportData = await this.exportService.generateExportData(mockRecords);
+      const caller: ExportCaller = {
+        userId,
+        role: userRole,
+      };
 
-      // In production, this would write to a file storage service (S3, etc)
       const filePath = `/exports/${exportId}.json`;
+      const streamResult = await this.exportService.streamExportDataset(
+        exportId,
+        recordType,
+        generateChunks(100, 25),
+        caller,
+      );
+
+      if (streamResult.status === 'cancelled') {
+        return {
+          exportId,
+          status: 'cancelled',
+          recordCount: streamResult.totalRecordsProcessed,
+        };
+      }
 
       await this.exportService.updateExportStatus(exportId, 'completed', {
-        recordCount: mockRecords.length,
+        recordCount: streamResult.totalRecordsProcessed,
         filePath,
       });
 
       return {
         exportId,
-        recordCount: mockRecords.length,
+        status: 'completed',
+        recordCount: streamResult.totalRecordsProcessed,
         filePath,
-        schemaVersion: exportData.schema.version,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

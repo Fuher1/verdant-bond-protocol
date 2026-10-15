@@ -1,8 +1,25 @@
+export type ExportStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export enum ExportRole {
+  INVESTOR = 'INVESTOR',
+  ISSUER = 'ISSUER',
+  AUDITOR = 'AUDITOR',
+  ADMIN = 'ADMIN',
+}
+
+export interface ExportCaller {
+  userId: string;
+  role: ExportRole;
+  organizationId?: string;
+}
+
 export interface ExportableRecord {
   id: string;
   type: string;
   createdAt: Date;
   data: Record<string, any>;
+  ownerUserId?: string;
+  organizationId?: string;
 }
 
 export interface ExportSchema {
@@ -16,13 +33,14 @@ export interface ExportSchema {
 export interface DataExport {
   id: string;
   userId: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: ExportStatus;
   schema: ExportSchema;
   recordCount: number;
   filePath?: string;
   expiresAt: Date;
   createdAt: Date;
   completedAt?: Date;
+  cancelledAt?: Date;
   error?: string;
 }
 
@@ -31,4 +49,24 @@ export enum ExportType {
   TRANSACTIONS = 'transactions',
   HOLDINGS = 'holdings',
   PERFORMANCE = 'performance',
+  BONDS = 'bonds',
+  COUPONS = 'coupons',
+  COMPLIANCE_AUDIT = 'compliance_audit',
+  KYC_PII = 'kyc_pii',
+}
+
+export interface ExportStreamOptions {
+  batchSize?: number;
+  abortSignal?: AbortSignal;
+  caller: ExportCaller;
+}
+
+export interface ExportStreamResult {
+  exportId: string;
+  status: ExportStatus;
+  totalRecordsProcessed: number;
+  totalChunks: number;
+  completedAt?: Date;
+  cancelledAt?: Date;
+  error?: string;
 }

@@ -14,6 +14,8 @@
     "seed": "ts-node scripts/seed.ts",
     "seed:reset": "ts-node scripts/seed.ts --reset",
     "reindex-holders": "ts-node scripts/reindex-holders.ts",
+    "incident:drill": "ts-node scripts/incident-drill.ts",
+    "validate:rollback": "ts-node scripts/validate-rollback.ts",
     "mutate": "stryker run",
     "test:mutate": "stryker run --reporter progress --thresholds.high 50"
   },
